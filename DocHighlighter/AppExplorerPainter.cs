@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Windows;
@@ -302,27 +303,36 @@ internal sealed class AppExplorerPainter
             rowStates.Add(row, state);
         }
 
-        var selected = row.IsSelected;
-        if (state.Applied == color && state.AppliedWhileSelected == selected) return;
-        state.Applied = color;
-        state.AppliedWhileSelected = selected;
-
         if (color is null)
         {
+            if (state.Applied is null) return;
+            state.Applied = null;
             Restore(row, Control.BackgroundProperty, state.Background);
             Restore(row, Control.BorderBrushProperty, state.BorderBrush);
             Restore(row, Control.BorderThicknessProperty, state.BorderThickness);
             return;
         }
+        state.Applied = color;
 
-        row.BorderBrush = HighlightBrushes.Strip(color.Value);
-        row.BorderThickness = StripThickness;
+        // Compare with what the row shows right now, not with what was last set: Studio Pro can reset a row's look on
+        // its own (while refreshing the tree or redrawing the selection), and the row must then be painted again.
+        var strip = HighlightBrushes.Strip(color.Value);
+        var fill = HighlightBrushes.Fill(color.Value);
+        if (!ReferenceEquals(row.BorderBrush, strip)) row.BorderBrush = strip;
+        if (row.BorderThickness != StripThickness) row.BorderThickness = StripThickness;
         // Keep Studio Pro's own selection color visible on selected rows; the strip still shows the highlight.
-        if (selected)
-            Restore(row, Control.BackgroundProperty, state.Background);
-        else
-            row.Background = HighlightBrushes.Fill(color.Value);
+        if (row.IsSelected)
+        {
+            if (row.Background is SolidColorBrush current && IsHighlightFill(current)) Restore(row, Control.BackgroundProperty, state.Background);
+        }
+        else if (!ReferenceEquals(row.Background, fill))
+        {
+            row.Background = fill;
+        }
     }
+
+    static bool IsHighlightFill(Brush brush) =>
+        Enum.GetValues<HighlightColor>().Any(c => ReferenceEquals(HighlightBrushes.Fill(c), brush));
 
     static void Restore(DependencyObject target, DependencyProperty property, object original)
     {
@@ -338,6 +348,5 @@ internal sealed class AppExplorerPainter
         public object BorderBrush { get; } = borderBrush;
         public object BorderThickness { get; } = borderThickness;
         public HighlightColor? Applied { get; set; }
-        public bool AppliedWhileSelected { get; set; }
     }
 }
