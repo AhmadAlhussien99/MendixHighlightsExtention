@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -24,6 +25,7 @@ internal sealed class AppExplorerPainter
     static AppExplorerPainter? instance;
 
     readonly Func<string?> getAppDirectory;
+    readonly ModuleIndex modules;
     readonly ILogService log;
     readonly bool diagnostics = Environment.GetEnvironmentVariable("MX_DOCHIGHLIGHTER_DIAG") == "1";
     readonly Dispatcher dispatcher;
@@ -32,7 +34,13 @@ internal sealed class AppExplorerPainter
     readonly List<WeakReference<DataGrid>> grids = new();
     readonly ConditionalWeakTable<DataGrid, object> hookedGrids = new();
     readonly ConditionalWeakTable<DataGridRow, RowState> rowStates = new();
+    readonly ConditionalWeakTable<DataGridRow, ModuleFlag> flags = new();
     readonly Dictionary<(Type, string), PropertyInfo?> propertyCache = new();
+    readonly Dictionary<string, HighlightColor?> innerColors = new(StringComparer.OrdinalIgnoreCase);
+    HashSet<string>? moduleIds;
+    HighlightStore? innerColorsStore;
+    int innerColorsVersion;
+    DateTime innerColorsTimeUtc;
     int tickCount;
     int scansWithoutGrid;
     bool errorLogged;
@@ -42,6 +50,7 @@ internal sealed class AppExplorerPainter
     {
         this.dispatcher = dispatcher;
         this.getAppDirectory = getAppDirectory;
+        this.modules = modules;
         this.log = log;
         timer = new DispatcherTimer(TimeSpan.FromMilliseconds(750), DispatcherPriority.Background, (_, _) => Tick(), dispatcher);
         timer.Start();
@@ -86,7 +95,11 @@ internal sealed class AppExplorerPainter
             grid.LoadingRow -= OnLoadingRow;
             grid.SelectionChanged -= OnSelectionChanged;
             grid.PreviewKeyDown -= OnPreviewKeyDown;
-            ForEachRealizedRow(grid, row => Apply(row, null));
+            ForEachRealizedRow(grid, row =>
+            {
+                Apply(row, null);
+                SetFlag(row, null);
+            });
         }
         grids.Clear();
         log.Info("DocHighlighter: stopped");
@@ -223,10 +236,15 @@ internal sealed class AppExplorerPainter
     void PaintRow(DataGridRow row, HighlightStore? store)
     {
         HighlightColor? color = null;
+        HighlightColor? flag = null;
         if (store != null && store.Count > 0)
         {
             var id = GetUnitId(row.Item);
-            if (id != null) color = store.Get(id);
+            if (id != null)
+            {
+                color = store.Get(id);
+                if (color is null) flag = InnerColor(id, store);
+            }
             if (diagnostics && diagnosticRowsLogged < 15)
             {
                 diagnosticRowsLogged++;
@@ -234,6 +252,62 @@ internal sealed class AppExplorerPainter
             }
         }
         Apply(row, color);
+        SetFlag(row, flag);
+    }
+
+    /// <summary>
+    /// For a module row: the most serious color among the highlighted items inside the module (red, then orange, then
+    /// green), or null if there are none or the row is not a module. Walking a module is too slow for every repaint,
+    /// so results are kept until the highlights change, and for at most 10 seconds to pick up documents moved between
+    /// modules.
+    /// </summary>
+    HighlightColor? InnerColor(string id, HighlightStore store)
+    {
+        if (!ReferenceEquals(store, innerColorsStore) || store.Version != innerColorsVersion ||
+            DateTime.UtcNow - innerColorsTimeUtc > TimeSpan.FromSeconds(10))
+        {
+            innerColors.Clear();
+            moduleIds = null;
+            innerColorsStore = store;
+            innerColorsVersion = store.Version;
+            innerColorsTimeUtc = DateTime.UtcNow;
+        }
+        moduleIds ??= modules.GetModules().Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!moduleIds.Contains(id)) return null;
+
+        if (!innerColors.TryGetValue(id, out var inner))
+        {
+            foreach (var itemId in modules.GetIdsInModules(new[] { id }, store))
+                if (!string.Equals(itemId, id, StringComparison.OrdinalIgnoreCase) && store.Get(itemId) is { } color &&
+                    (inner is null || color > inner))
+                    inner = color;
+            innerColors[id] = inner;
+        }
+        return inner;
+    }
+
+    void SetFlag(DataGridRow row, HighlightColor? color)
+    {
+        flags.TryGetValue(row, out var flag);
+        // Rows recycled while scrolling can stay in the tree but hidden; they must not keep a flag.
+        if (color is null || !row.IsVisible)
+        {
+            if (flag is null) return;
+            AdornerLayer.GetAdornerLayer(row)?.Remove(flag);
+            flags.Remove(row);
+            return;
+        }
+        if (flag is null)
+        {
+            var layer = AdornerLayer.GetAdornerLayer(row);
+            if (layer is null) return;
+            flag = new ModuleFlag(row, color.Value);
+            layer.Add(flag);
+            flags.Add(row, flag);
+        }
+        flag.Color = color.Value;
+        // The name can move (renamed, tree indented differently), so redraw on every pass; it is a few lines.
+        flag.InvalidateVisual();
     }
 
     /// <summary>

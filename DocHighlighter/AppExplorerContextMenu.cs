@@ -275,15 +275,8 @@ internal sealed class AppExplorerContextMenu
     void RemoveModuleHighlights(HighlightStore store, List<HighlightTarget> moduleTargets) =>
         Run("could not remove the module's highlights", () => store.Remove(IdsInModules(store, moduleTargets)));
 
-    /// <summary>Ids of everything in the modules: their model units, plus highlighted files recorded as being in them.</summary>
-    HashSet<string> IdsInModules(HighlightStore store, List<HighlightTarget> moduleTargets)
-    {
-        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var module in moduleTargets)
-            ids.UnionWith(modules.GetUnitIdsInModule(module.Id));
-        ids.UnionWith(store.IdsInModules(moduleTargets.Select(t => t.Id).ToHashSet(StringComparer.OrdinalIgnoreCase)));
-        return ids;
-    }
+    HashSet<string> IdsInModules(HighlightStore store, List<HighlightTarget> moduleTargets) =>
+        modules.GetIdsInModules(moduleTargets.Select(t => t.Id).ToList(), store);
 
     void Run(string failureMessage, Action action)
     {

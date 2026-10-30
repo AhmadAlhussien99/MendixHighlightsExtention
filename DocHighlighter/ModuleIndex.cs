@@ -46,6 +46,19 @@ internal sealed class ModuleIndex(Func<IModel?> getModel, IUntypedModelAccessSer
         return ids;
     }
 
+    /// <summary>
+    /// Ids of everything in the modules: the modules themselves, their model units, and the highlighted files
+    /// (items that are not model units, such as Maia skills) recorded as being in them.
+    /// </summary>
+    public HashSet<string> GetIdsInModules(IReadOnlyCollection<string> moduleIds, HighlightStore store)
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var moduleId in moduleIds)
+            ids.UnionWith(GetUnitIdsInModule(moduleId));
+        ids.UnionWith(store.IdsInModules(moduleIds.ToHashSet(StringComparer.OrdinalIgnoreCase)));
+        return ids;
+    }
+
     IModelRoot? Root()
     {
         var model = getModel();

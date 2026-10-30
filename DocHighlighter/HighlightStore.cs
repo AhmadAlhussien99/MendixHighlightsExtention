@@ -31,6 +31,10 @@ internal sealed class HighlightStore
     Dictionary<string, Entry> entries = new(StringComparer.OrdinalIgnoreCase);
     DateTime loadedWriteTimeUtc;
 
+    /// <summary>Goes up whenever the highlights change (here or in another Studio Pro instance), so results computed
+    /// from them can be cached until then.</summary>
+    public int Version { get; private set; }
+
     HighlightStore(string appDirectory, ILogService log)
     {
         this.appDirectory = appDirectory;
@@ -115,6 +119,7 @@ internal sealed class HighlightStore
 
     void Load()
     {
+        Version++;
         entries = new(StringComparer.OrdinalIgnoreCase);
         loadedWriteTimeUtc = DateTime.MinValue;
         if (!File.Exists(filePath)) return;
@@ -144,6 +149,7 @@ internal sealed class HighlightStore
 
     void Save()
     {
+        Version++;
         Directory.CreateDirectory(StorageRoot);
         var file = new StoreFile { AppDirectory = appDirectory, Highlights = entries };
         var tempPath = filePath + ".tmp";
