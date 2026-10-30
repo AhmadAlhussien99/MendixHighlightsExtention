@@ -35,11 +35,11 @@ internal sealed class AppExplorerPainter
     readonly ConditionalWeakTable<DataGridRow, RowState> rowStates = new();
     readonly ConditionalWeakTable<DataGridRow, RowMarks> marks = new();
     readonly Dictionary<(Type, string), PropertyInfo?> propertyCache = new();
-    readonly Dictionary<string, bool> flaggedModules = new(StringComparer.OrdinalIgnoreCase);
-    HashSet<string>? moduleIds;
-    HighlightStore? flaggedModulesStore;
-    int flaggedModulesVersion;
-    DateTime flaggedModulesTimeUtc;
+    readonly Dictionary<string, bool> flaggedContainers = new(StringComparer.OrdinalIgnoreCase);
+    HashSet<string>? containerIds;
+    HighlightStore? flaggedContainersStore;
+    int flaggedContainersVersion;
+    DateTime flaggedContainersTimeUtc;
     int tickCount;
     int scansWithoutGrid;
     bool errorLogged;
@@ -267,29 +267,29 @@ internal sealed class AppExplorerPainter
     }
 
     /// <summary>
-    /// Whether this is a module row with highlighted items inside. Walking a module is too slow for every repaint,
+    /// Whether this is a module or folder row with highlighted items inside. Walking one is too slow for every repaint,
     /// so results are kept until the highlights change, and for at most 10 seconds to pick up documents moved between
-    /// modules.
+    /// modules and folders.
     /// </summary>
     bool HasHighlightsInside(string id, HighlightStore store)
     {
-        if (!ReferenceEquals(store, flaggedModulesStore) || store.Version != flaggedModulesVersion ||
-            DateTime.UtcNow - flaggedModulesTimeUtc > TimeSpan.FromSeconds(10))
+        if (!ReferenceEquals(store, flaggedContainersStore) || store.Version != flaggedContainersVersion ||
+            DateTime.UtcNow - flaggedContainersTimeUtc > TimeSpan.FromSeconds(10))
         {
-            flaggedModules.Clear();
-            moduleIds = null;
-            flaggedModulesStore = store;
-            flaggedModulesVersion = store.Version;
-            flaggedModulesTimeUtc = DateTime.UtcNow;
+            flaggedContainers.Clear();
+            containerIds = null;
+            flaggedContainersStore = store;
+            flaggedContainersVersion = store.Version;
+            flaggedContainersTimeUtc = DateTime.UtcNow;
         }
-        moduleIds ??= modules.GetModules().Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (!moduleIds.Contains(id)) return false;
+        containerIds ??= modules.GetContainerIds();
+        if (!containerIds.Contains(id)) return false;
 
-        if (!flaggedModules.TryGetValue(id, out var hasHighlights))
+        if (!flaggedContainers.TryGetValue(id, out var hasHighlights))
         {
-            hasHighlights = modules.GetIdsInModules(new[] { id }, store)
+            hasHighlights = modules.GetIdsIn(new[] { id }, store)
                 .Any(itemId => !string.Equals(itemId, id, StringComparison.OrdinalIgnoreCase) && store.Get(itemId) != null);
-            flaggedModules[id] = hasHighlights;
+            flaggedContainers[id] = hasHighlights;
         }
         return hasHighlights;
     }

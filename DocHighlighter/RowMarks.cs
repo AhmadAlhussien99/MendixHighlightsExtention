@@ -10,7 +10,7 @@ namespace DocHighlighter;
 
 /// <summary>
 /// What the extension draws on top of an App Explorer row: the colored strip on the left of a highlighted row, and the
-/// small flag after the name of a module that is not highlighted itself but contains highlighted items. It is an
+/// small flag after the name of a module or folder that is not highlighted itself but contains highlighted items. It is an
 /// adorner: drawn on a layer above the row, so Studio Pro's own row content is never changed, and it ignores the mouse.
 /// </summary>
 internal sealed class RowMarks : Adorner
@@ -30,7 +30,7 @@ internal sealed class RowMarks : Adorner
     /// <summary>The strip color of a highlighted row, or null for none.</summary>
     public Brush? Strip { get; set; }
 
-    /// <summary>Whether to draw the flag of a module with highlighted items inside.</summary>
+    /// <summary>Whether to draw the flag of a module or folder with highlighted items inside.</summary>
     public bool Flag { get; set; }
 
     protected override void OnRender(DrawingContext drawing)

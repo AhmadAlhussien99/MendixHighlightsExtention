@@ -13,7 +13,7 @@ namespace DocHighlighter;
 
 /// <summary>
 /// Appends "Highlight", then Green / Orange / Red / Remove highlight, to the App Explorer's own right-click menu,
-/// so it works for every item there (documents of any type, folders, modules, ...). On a module row, "Highlight"
+/// so it works for every item there (documents of any type, folders, modules, ...). On a module or folder row, "Highlight"
 /// also shows the module's counts and opens the bulk-removal submenu. The same actions are on Ctrl+Alt+1/2/3/0.
 /// </summary>
 internal sealed class AppExplorerContextMenu
@@ -55,11 +55,11 @@ internal sealed class AppExplorerContextMenu
             var targets = SelectedTargets(grid);
             if (targets.Count == 0) return;
 
-            // Module-only entries are offered on module rows themselves, so they are never hit by accident.
-            var moduleIds = modules.GetModules().Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var onModules = targets.All(t => moduleIds.Contains(t.Id));
+            // Counts and bulk removal are offered on module and folder rows themselves, so they are never hit by accident.
+            var containerIds = modules.GetContainerIds();
+            var onContainers = targets.All(t => containerIds.Contains(t.Id));
 
-            var items = BuildMenuItems(store, grid, targets, onModules);
+            var items = BuildMenuItems(store, grid, targets, onContainers);
             MatchNativeStyle(menu, items);
             foreach (var item in items)
                 menu.Items.Add(item);
@@ -123,22 +123,22 @@ internal sealed class AppExplorerContextMenu
 
     /// <summary>
     /// The entries appended to the menu: a separator, the "Highlight" title, then the colors and "Remove highlight"
-    /// directly in the menu. On a module row the title shows the module's counts and opens a submenu holding only the
-    /// bulk removal, one level deeper so it is never hit by accident. Elsewhere the title is a plain label.
+    /// directly in the menu. On a module or folder row the title shows the counts inside it and opens a submenu holding
+    /// only the bulk removal, one level deeper so it is never hit by accident. Elsewhere the title is a plain label.
     /// </summary>
-    List<Control> BuildMenuItems(HighlightStore store, DataGrid grid, List<HighlightTarget> targets, bool onModules)
+    List<Control> BuildMenuItems(HighlightStore store, DataGrid grid, List<HighlightTarget> targets, bool onContainers)
     {
         var colors = targets.Select(t => store.Get(t.Id)).Distinct().ToList();
         HighlightColor? sharedColor = colors.Count == 1 ? colors[0] : null;
         var items = new List<Control> { new Separator { Tag = InjectedTag } };
 
-        if (onModules)
+        if (onContainers)
         {
-            var removeModule = new MenuItem { Header = "Remove all highlights in this module", IsEnabled = store.Count > 0 };
-            removeModule.Click += (_, _) => RemoveModuleHighlights(store, targets);
+            var removeAll = new MenuItem { Header = BulkRemoveLabel(targets), IsEnabled = store.Count > 0 };
+            removeAll.Click += (_, _) => RemoveContainedHighlights(store, targets);
             var bulk = new MenuItem { Header = "Bulk remove" };
-            bulk.Items.Add(removeModule);
-            var title = new MenuItem { Header = ModuleCountsHeader(store, targets), Tag = InjectedTag };
+            bulk.Items.Add(removeAll);
+            var title = new MenuItem { Header = CountsHeader(store, targets), Tag = InjectedTag };
             title.Items.Add(bulk);
             items.Add(title);
         }
@@ -175,17 +175,28 @@ internal sealed class AppExplorerContextMenu
         return items;
     }
 
-    /// <summary>
-    /// "Highlight  ■ 3  ■ 1  ■ 2": the Highlight title of a module row, with how many items in the selected
-    /// module(s) have each color.
-    /// The modules' own highlights are not counted.
-    /// </summary>
-    StackPanel ModuleCountsHeader(HighlightStore store, List<HighlightTarget> moduleTargets)
+    /// <summary>"Remove all highlights in this module / folder", or the plural for several selected rows.</summary>
+    string BulkRemoveLabel(List<HighlightTarget> containerTargets)
     {
-        var moduleIds = moduleTargets.Select(t => t.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var moduleIds = modules.GetModules().Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var moduleCount = containerTargets.Count(t => moduleIds.Contains(t.Id));
+        var single = containerTargets.Count == 1;
+        var what = moduleCount == containerTargets.Count ? (single ? "this module" : "these modules")
+            : moduleCount == 0 ? (single ? "this folder" : "these folders")
+            : "the selected modules and folders";
+        return "Remove all highlights in " + what;
+    }
+
+    /// <summary>
+    /// "Highlight  ■ 3  ■ 1  ■ 2": the Highlight title of a module or folder row, with how many items inside the
+    /// selected module(s) or folder(s) have each color. Their own highlights are not counted.
+    /// </summary>
+    StackPanel CountsHeader(HighlightStore store, List<HighlightTarget> containerTargets)
+    {
+        var containerIds = containerTargets.Select(t => t.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var counts = new Dictionary<HighlightColor, int>();
-        foreach (var id in IdsInModules(store, moduleTargets))
-            if (!moduleIds.Contains(id) && store.Get(id) is { } color)
+        foreach (var id in IdsIn(store, containerTargets))
+            if (!containerIds.Contains(id) && store.Get(id) is { } color)
                 counts[color] = counts.GetValueOrDefault(color) + 1;
 
         var header = new StackPanel { Orientation = Orientation.Horizontal };
@@ -266,17 +277,17 @@ internal sealed class AppExplorerContextMenu
         {
             if (painter.GetUnitId(items[i]) is not { } id || !moduleIds.Contains(id)) continue;
             if (!modelUnits.TryGetValue(id, out var units))
-                modelUnits[id] = units = modules.GetUnitIdsInModule(id);
+                modelUnits[id] = units = modules.GetUnitIdsIn(id);
             return units.Contains(target.Id) ? null : id;
         }
         return null;
     }
 
-    void RemoveModuleHighlights(HighlightStore store, List<HighlightTarget> moduleTargets) =>
-        Run("could not remove the module's highlights", () => store.Remove(IdsInModules(store, moduleTargets)));
+    void RemoveContainedHighlights(HighlightStore store, List<HighlightTarget> containerTargets) =>
+        Run("could not remove the highlights inside the selection", () => store.Remove(IdsIn(store, containerTargets)));
 
-    HashSet<string> IdsInModules(HighlightStore store, List<HighlightTarget> moduleTargets) =>
-        modules.GetIdsInModules(moduleTargets.Select(t => t.Id).ToList(), store);
+    HashSet<string> IdsIn(HighlightStore store, List<HighlightTarget> containerTargets) =>
+        modules.GetIdsIn(containerTargets.Select(t => t.Id).ToList(), store);
 
     void Run(string failureMessage, Action action)
     {
