@@ -15,6 +15,10 @@ namespace DocHighlighter;
 /// menus when an app opens, which starts the painter and the App Explorer context menu.
 /// </summary>
 /// <remarks>
+/// Studio Pro itself puts an extension's menus in a group named after the extension (its folder and DLL name,
+/// "Highlights"), so the item is returned directly rather than inside a submenu of its own.
+/// </remarks>
+/// <remarks>
 /// The App Explorer "Highlight" submenu is not built with ContextMenuExtension: Studio Pro 10.24 only offers
 /// that for units with a public API model (pages, microflows, ...), not nanoflows, snippets, folders, modules, etc.
 /// See <see cref="AppExplorerContextMenu"/>.
@@ -34,10 +38,7 @@ public sealed class HighlightMenuExtension(ILogService log, IUntypedModelAccessS
         }
         AppExplorerPainter.EnsureStarted(AppDirectory, modules, log);
 
-        yield return new MenuViewModel("Highlights", new[]
-        {
-            new MenuViewModel("Open highlights folder", OpenFolder),
-        });
+        yield return new MenuViewModel("Open highlights folder", OpenFolder);
     }
 
     void OpenFolder()

@@ -35,7 +35,8 @@ if ($Mode -eq "Ide") {
         $target = Join-Path $install.ModelerDir "extensions\$ExtensionFolder"
         Assert-StudioProClosed $install
         if (Test-Admin) {
-            Remove-Item $target -Recurse -Force
+            if (Test-Path $target) { Remove-Item $target -Recurse -Force }
+            Remove-LegacyExtensions (Split-Path $target)
         }
         else {
             $elevatedArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Mode Ide -Version `"$($install.Name)`" -MendixRoot `"$MendixRoot`" -PauseOnError"
@@ -52,6 +53,7 @@ else {
     if (-not $AppPath) { throw "-AppPath is required for -Mode App" }
     $target = Join-Path $AppPath "extensions\$extensionFolder"
     if (Test-Path $target) { Remove-Item $target -Recurse -Force; Write-Host "Removed $target" }
+    Remove-LegacyExtensions (Split-Path $target)
     $extensionsDir = Join-Path $AppPath "extensions"
     if ((Test-Path $extensionsDir) -and -not (Get-ChildItem $extensionsDir -Force)) { Remove-Item $extensionsDir }
     $exclude = Join-Path $AppPath ".git\info\exclude"

@@ -3,7 +3,12 @@
   on this machine and lets the user pick one.
 #>
 
-$ExtensionFolder = "DocHighlighter"
+# Studio Pro names an extension after its folder (newer loader) or its DLL (older loader) and shows that name as
+# the extension's group under the Extensions menu, so both read "Highlights".
+$ExtensionFolder = "Highlights"
+$ExtensionDll = "Highlights.MendixExtension.dll"
+# Folder names used by earlier versions. Installing and uninstalling remove them, so Studio Pro never loads two copies.
+$LegacyExtensionFolders = @("DocHighlighter")
 $DefaultMendixRoot = Join-Path ${env:ProgramFiles} "Mendix"
 # The oldest Extensions API that has everything the extension uses (MenuExtension, the untyped model API).
 # 10.3 and older lack them; 10.24.1 is the oldest version the code is known to compile against.
@@ -31,10 +36,22 @@ function Get-StudioProInstalls([string]$MendixRoot = $DefaultMendixRoot) {
             Name       = $dir.Name
             ModelerDir = $modeler
             ApiVersion = [Reflection.AssemblyName]::GetAssemblyName($api).Version
-            Installed  = Test-Path (Join-Path $modeler "extensions\$ExtensionFolder")
+            Installed  = [bool](@($ExtensionFolder) + $LegacyExtensionFolders |
+                Where-Object { Test-Path (Join-Path $modeler "extensions\$_") })
         }
     }
     @($installs | Sort-Object ApiVersion -Descending)
+}
+
+<# Deletes copies installed under an earlier folder name from an extensions folder. #>
+function Remove-LegacyExtensions([string]$extensionsDir) {
+    foreach ($name in $LegacyExtensionFolders) {
+        $legacy = Join-Path $extensionsDir $name
+        if (Test-Path $legacy) {
+            Remove-Item $legacy -Recurse -Force
+            Write-Host "Removed the previous version from $legacy"
+        }
+    }
 }
 
 <#

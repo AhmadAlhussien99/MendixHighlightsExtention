@@ -1,7 +1,7 @@
 <#
-  Builds DocHighlighter.dll without needing a .NET SDK.
+  Builds the extension without needing a .NET SDK.
   It uses the Roslyn compiler that ships with Studio Pro, driven by tools\mxcsc.
-  Output: .\out\DocHighlighter\ (DocHighlighter.MendixExtension.dll + manifest.json)
+  Output: .\out\Highlights\ (Highlights.MendixExtension.dll + manifest.json)
 
   It compiles against the OLDEST installed Studio Pro that is new enough, because the DLL then also loads in every
   newer version. Pass -StudioProDir "<Mendix>\<version>\modeler" to compile against a specific one.
@@ -23,7 +23,7 @@ if (-not $StudioProDir) {
 }
 $root = $PSScriptRoot
 $src = Join-Path $root "DocHighlighter"
-$out = Join-Path $root "out\DocHighlighter"
+$out = Join-Path $root "out\$ExtensionFolder"
 $tools = Join-Path $root "tools\mxcsc"
 # One compiler host per Studio Pro version: each ships its own Roslyn, which needs that version's .NET runtime.
 $hostDll = Join-Path $tools "bin\$(Split-Path (Split-Path $StudioProDir) -Leaf)\mxcsc.dll"
@@ -74,7 +74,7 @@ $refs | Set-Content -Encoding utf8 $refList
 # 3. Compile.
 New-Item -ItemType Directory -Force $out | Out-Null
 $sources = Get-ChildItem "$src\*.cs" | ForEach-Object FullName
-& dotnet exec $hostDll (Join-Path $out "DocHighlighter.MendixExtension.dll") $refList @sources
+& dotnet exec $hostDll (Join-Path $out $ExtensionDll) $refList @sources
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 Copy-Item "$src\manifest.json" $out -Force
 Write-Host "Built -> $out"

@@ -4,13 +4,14 @@
   -Mode Ide (default, recommended)
       Shows the Studio Pro versions installed on this machine and asks which one to install into
       (or pass -Version 11.12.6 to skip the question). Copies the extension into that version's own folder:
-        C:\Program Files\Mendix\<version>\modeler\extensions\DocHighlighter
+        C:\Program Files\Mendix\<version>\modeler\extensions\Highlights
+      A copy installed by an earlier version (extensions\DocHighlighter) is removed.
       Nothing is written inside any app folder, so nothing can ever be committed.
       Needs administrator rights (you will get a UAC prompt). Works for every app you open in that version.
       Run it again to add the extension to another version.
 
   -Mode App -AppPath <app folder>
-      Copies the extension into <app>\extensions\DocHighlighter and hides it from Git through
+      Copies the extension into <app>\extensions\Highlights and hides it from Git through
       .git\info\exclude (a local-only file that is never committed or pushed).
       Studio Pro must then be started with --enable-extension-development.
 
@@ -35,8 +36,8 @@ trap {
     exit 1
 }
 . (Join-Path $PSScriptRoot "tools\StudioPro.ps1")
-$source = Join-Path $PSScriptRoot "out\DocHighlighter"
-$dll = Join-Path $source "DocHighlighter.MendixExtension.dll"
+$source = Join-Path $PSScriptRoot "out\$ExtensionFolder"
+$dll = Join-Path $source $ExtensionDll
 $excludeLine = "/extensions/$ExtensionFolder/"
 
 if (-not (Test-Path $dll)) {
@@ -71,6 +72,7 @@ if ($Mode -eq "Ide") {
     }
     New-Item -ItemType Directory -Force $target | Out-Null
     Copy-Item "$source\*" $target -Force
+    Remove-LegacyExtensions (Split-Path $target)
     Write-Host "Installed to $target"
     Write-Host "Start Studio Pro $($install.Name) normally; right-click anything in the App Explorer > Highlight."
     exit 0
@@ -83,6 +85,7 @@ if (-not (Get-ChildItem $AppPath -Filter *.mpr)) { throw "$AppPath does not cont
 $target = Join-Path $AppPath "extensions\$extensionFolder"
 New-Item -ItemType Directory -Force $target | Out-Null
 Copy-Item "$source\*" $target -Force
+Remove-LegacyExtensions (Split-Path $target)
 Write-Host "Installed to $target"
 
 $gitDir = Join-Path $AppPath ".git"
