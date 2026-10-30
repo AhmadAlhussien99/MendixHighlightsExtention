@@ -1,0 +1,5 @@
+# Build output
+out/
+
+# Compiler host, built locally from tools/mxcsc/Program.cs (includes copies of Studio Pro's compiler DLLs)
+tools/mxcsc/bin/
