@@ -1,5 +1,7 @@
 # Document Highlighter for Mendix Studio Pro
 
+By Ahmad Alhussien - https://www.linkedin.com/in/ahmadalhussien/
+
 Color-code items in the Studio Pro **App Explorer**. Right-click any page, microflow, folder, module or other item and
 choose **Highlight → Green / Orange / Red**. On a module, the menu also shows how many items of each color it contains.
 
