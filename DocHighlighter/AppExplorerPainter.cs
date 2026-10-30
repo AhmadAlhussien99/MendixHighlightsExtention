@@ -21,7 +21,6 @@ namespace DocHighlighter;
 internal sealed class AppExplorerPainter
 {
     const string ExplorerGridTypeName = "TreeControlEtoDataGrid";
-    static readonly Thickness StripThickness = new(3, 0, 0, 0);
     static AppExplorerPainter? instance;
 
     readonly Func<string?> getAppDirectory;
@@ -34,7 +33,7 @@ internal sealed class AppExplorerPainter
     readonly List<WeakReference<DataGrid>> grids = new();
     readonly ConditionalWeakTable<DataGrid, object> hookedGrids = new();
     readonly ConditionalWeakTable<DataGridRow, RowState> rowStates = new();
-    readonly ConditionalWeakTable<DataGridRow, ModuleFlag> flags = new();
+    readonly ConditionalWeakTable<DataGridRow, RowMarks> marks = new();
     readonly Dictionary<(Type, string), PropertyInfo?> propertyCache = new();
     readonly Dictionary<string, bool> flaggedModules = new(StringComparer.OrdinalIgnoreCase);
     HashSet<string>? moduleIds;
@@ -95,10 +94,11 @@ internal sealed class AppExplorerPainter
             grid.LoadingRow -= OnLoadingRow;
             grid.SelectionChanged -= OnSelectionChanged;
             grid.PreviewKeyDown -= OnPreviewKeyDown;
+            grid.RemoveHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(OnScrollChanged));
             ForEachRealizedRow(grid, row =>
             {
                 Apply(row, null);
-                SetFlag(row, false);
+                SetMarks(row, null, false);
             });
         }
         grids.Clear();
@@ -198,6 +198,7 @@ internal sealed class AppExplorerPainter
         grid.LoadingRow += OnLoadingRow;
         grid.SelectionChanged += OnSelectionChanged;
         grid.PreviewKeyDown += OnPreviewKeyDown;
+        grid.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(OnScrollChanged));
         var store = CurrentStore();
         log.Info($"DocHighlighter: attached to a document tree ({grid.GetType().FullName}); {store?.Count ?? 0} highlight(s) in {store?.FilePath ?? "<no app open>"}");
     }
@@ -206,6 +207,16 @@ internal sealed class AppExplorerPainter
     void OnLoadingRow(object? sender, DataGridRowEventArgs e) => PaintRow(e.Row, CurrentStore());
 
     void OnSelectionChanged(object sender, SelectionChangedEventArgs e) => RequestRepaint();
+
+    // The strip follows the visible left edge, so redraw the marks right away when the tree scrolls sideways.
+    void OnScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (e.HorizontalChange == 0 || sender is not DataGrid grid) return;
+        ForEachRealizedRow(grid, row =>
+        {
+            if (marks.TryGetValue(row, out var rowMarks)) rowMarks.InvalidateVisual();
+        });
+    }
 
     // Only fires while the App Explorer has keyboard focus, so the shortcuts never affect editors or other panes.
     void OnPreviewKeyDown(object sender, KeyEventArgs e)
@@ -252,7 +263,7 @@ internal sealed class AppExplorerPainter
             }
         }
         Apply(row, color);
-        SetFlag(row, flag);
+        SetMarks(row, color is null ? null : HighlightBrushes.Strip(color.Value), flag);
     }
 
     /// <summary>
@@ -283,27 +294,31 @@ internal sealed class AppExplorerPainter
         return hasHighlights;
     }
 
-    void SetFlag(DataGridRow row, bool show)
+    /// <summary>Shows the strip and/or flag on a row, or removes the overlay when the row needs neither.</summary>
+    void SetMarks(DataGridRow row, Brush? strip, bool flag)
     {
-        flags.TryGetValue(row, out var flag);
-        // Rows recycled while scrolling can stay in the tree but hidden; they must not keep a flag.
-        if (!show || !row.IsVisible)
+        marks.TryGetValue(row, out var rowMarks);
+        // Rows recycled while scrolling can stay in the tree but hidden; they must not keep their marks.
+        if ((strip is null && !flag) || !row.IsVisible)
         {
-            if (flag is null) return;
-            AdornerLayer.GetAdornerLayer(row)?.Remove(flag);
-            flags.Remove(row);
+            if (rowMarks is null) return;
+            AdornerLayer.GetAdornerLayer(row)?.Remove(rowMarks);
+            marks.Remove(row);
             return;
         }
-        if (flag is null)
+        if (rowMarks is null)
         {
             var layer = AdornerLayer.GetAdornerLayer(row);
             if (layer is null) return;
-            flag = new ModuleFlag(row);
-            layer.Add(flag);
-            flags.Add(row, flag);
+            rowMarks = new RowMarks(row);
+            layer.Add(rowMarks);
+            marks.Add(row, rowMarks);
         }
-        // The name can move or change color (renamed, selected, theme), so redraw on every pass; it is a few lines.
-        flag.InvalidateVisual();
+        rowMarks.Strip = strip;
+        rowMarks.Flag = flag;
+        // The row can scroll, resize or change its name and colors (renamed, selected, theme), so redraw on every
+        // pass; it is a few lines.
+        rowMarks.InvalidateVisual();
     }
 
     /// <summary>
@@ -366,10 +381,7 @@ internal sealed class AppExplorerPainter
         if (!rowStates.TryGetValue(row, out var state))
         {
             if (color is null) return;
-            state = new RowState(
-                row.ReadLocalValue(Control.BackgroundProperty),
-                row.ReadLocalValue(Control.BorderBrushProperty),
-                row.ReadLocalValue(Control.BorderThicknessProperty));
+            state = new RowState(row.ReadLocalValue(Control.BackgroundProperty));
             rowStates.Add(row, state);
         }
 
@@ -378,19 +390,15 @@ internal sealed class AppExplorerPainter
             if (state.Applied is null) return;
             state.Applied = null;
             Restore(row, Control.BackgroundProperty, state.Background);
-            Restore(row, Control.BorderBrushProperty, state.BorderBrush);
-            Restore(row, Control.BorderThicknessProperty, state.BorderThickness);
             return;
         }
         state.Applied = color;
 
         // Compare with what the row shows right now, not with what was last set: Studio Pro can reset a row's look on
         // its own (while refreshing the tree or redrawing the selection), and the row must then be painted again.
-        var strip = HighlightBrushes.Strip(color.Value);
         var fill = HighlightBrushes.Fill(color.Value);
-        if (!ReferenceEquals(row.BorderBrush, strip)) row.BorderBrush = strip;
-        if (row.BorderThickness != StripThickness) row.BorderThickness = StripThickness;
-        // Keep Studio Pro's own selection color visible on selected rows; the strip still shows the highlight.
+        // Keep Studio Pro's own selection color visible on selected rows; the strip (see RowMarks) still shows the
+        // highlight.
         if (row.IsSelected)
         {
             if (row.Background is SolidColorBrush current && IsHighlightFill(current)) Restore(row, Control.BackgroundProperty, state.Background);
@@ -412,11 +420,9 @@ internal sealed class AppExplorerPainter
             target.SetValue(property, original);
     }
 
-    sealed class RowState(object background, object borderBrush, object borderThickness)
+    sealed class RowState(object background)
     {
         public object Background { get; } = background;
-        public object BorderBrush { get; } = borderBrush;
-        public object BorderThickness { get; } = borderThickness;
         public HighlightColor? Applied { get; set; }
     }
 }

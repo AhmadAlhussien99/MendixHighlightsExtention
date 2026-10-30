@@ -9,30 +9,57 @@ using System.Windows.Media;
 namespace DocHighlighter;
 
 /// <summary>
-/// A small flag drawn just after the name of a module row that is not highlighted itself but contains highlighted
-/// items, in the same color as the module name. It is an adorner: drawn on a layer above the row, so Studio Pro's
-/// own row content is never changed, and it ignores the mouse.
+/// What the extension draws on top of an App Explorer row: the colored strip on the left of a highlighted row, and the
+/// small flag after the name of a module that is not highlighted itself but contains highlighted items. It is an
+/// adorner: drawn on a layer above the row, so Studio Pro's own row content is never changed, and it ignores the mouse.
 /// </summary>
-internal sealed class ModuleFlag : Adorner
+internal sealed class RowMarks : Adorner
 {
+    const double StripWidth = 3;
     const double PoleWidth = 1.5;
     const double PoleHeight = 11;
     const double FlagWidth = 8;
     const double FlagHeight = 6;
-    const double Gap = 6;
+    const double FlagGap = 6;
 
-    public ModuleFlag(DataGridRow row) : base(row)
+    public RowMarks(DataGridRow row) : base(row)
     {
         IsHitTestVisible = false;
     }
 
+    /// <summary>The strip color of a highlighted row, or null for none.</summary>
+    public Brush? Strip { get; set; }
+
+    /// <summary>Whether to draw the flag of a module with highlighted items inside.</summary>
+    public bool Flag { get; set; }
+
     protected override void OnRender(DrawingContext drawing)
     {
         var row = (DataGridRow)AdornedElement;
+        if (Strip != null)
+            drawing.DrawRectangle(Strip, null, new Rect(VisibleLeft(row), 0, StripWidth, row.ActualHeight));
+        if (Flag)
+            DrawFlag(drawing, row);
+    }
+
+    /// <summary>
+    /// The left edge of the part of the row that is in view, in row coordinates. When the App Explorer is scrolled
+    /// sideways the row's own left edge is out of view, and the strip would be too.
+    /// </summary>
+    static double VisibleLeft(DataGridRow row)
+    {
+        for (var parent = VisualTreeHelper.GetParent(row); parent != null; parent = VisualTreeHelper.GetParent(parent))
+            if (parent is ScrollViewer viewer)
+                return Math.Max(0, -row.TranslatePoint(new Point(0, 0), viewer).X);
+        return 0;
+    }
+
+    /// <summary>The flag goes after the last text (the name, or a version label shown after it), in the name's own
+    /// color, so it follows the theme and the selected-row text color.</summary>
+    static void DrawFlag(DrawingContext drawing, DataGridRow row)
+    {
         var texts = VisibleTexts(row).ToList();
-        // Drawn after the last text (the name, or a version label shown after it), in the name's own color, so it
-        // follows the theme and the selected-row text color.
-        var x = texts.Count == 0 ? 0 : texts.Max(t => t.Right) + Gap;
+        var x = texts.Count == 0 ? 0 : texts.Max(t => t.Right) + FlagGap;
         var brush = texts.Count == 0 ? row.Foreground : texts.MinBy(t => t.Left).Text.Foreground;
         var top = Math.Round((row.ActualHeight - PoleHeight) / 2);
         if (brush is null || x + PoleWidth + FlagWidth > row.ActualWidth) return;
