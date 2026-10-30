@@ -21,7 +21,7 @@ namespace DocHighlighter;
 internal sealed class AppExplorerPainter
 {
     const string ExplorerGridTypeName = "TreeControlEtoDataGrid";
-    static readonly Thickness StripThickness = new(4, 0, 0, 0);
+    static readonly Thickness StripThickness = new(3, 0, 0, 0);
     static AppExplorerPainter? instance;
 
     readonly Func<string?> getAppDirectory;
