@@ -54,7 +54,8 @@ function Get-RequiredApiVersion([string]$dllPath) {
         finally { $stream.Dispose() }
     }
     else {
-        $reference = [Reflection.Assembly]::ReflectionOnlyLoadFrom($dllPath).GetReferencedAssemblies() |
+        # Load from bytes, not from the path, so the file is not locked for the rest of the PowerShell session.
+        $reference = [Reflection.Assembly]::ReflectionOnlyLoad([IO.File]::ReadAllBytes($dllPath)).GetReferencedAssemblies() |
             Where-Object Name -eq "Mendix.StudioPro.ExtensionsAPI"
         if ($reference) { return $reference.Version }
     }

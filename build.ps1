@@ -25,7 +25,8 @@ $root = $PSScriptRoot
 $src = Join-Path $root "DocHighlighter"
 $out = Join-Path $root "out\DocHighlighter"
 $tools = Join-Path $root "tools\mxcsc"
-$hostDll = Join-Path $tools "bin\mxcsc.dll"
+# One compiler host per Studio Pro version: each ships its own Roslyn, which needs that version's .NET runtime.
+$hostDll = Join-Path $tools "bin\$(Split-Path (Split-Path $StudioProDir) -Leaf)\mxcsc.dll"
 
 function Get-RuntimeDir([string]$framework, [int]$major) {
     $base = Join-Path ${env:ProgramFiles} "dotnet\shared\$framework"
@@ -51,16 +52,16 @@ if (-not (Test-Path $hostDll)) {
     $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
     $refs = "System.Private.CoreLib","System.Runtime","System.Collections","System.Linq","System.Console",
             "System.Collections.Immutable","System.Runtime.Extensions","System.IO.FileSystem" |
-        ForEach-Object { "/r:$(Get-RuntimeDir "Microsoft.NETCore.App" 8)\$_.dll" }   # the host itself always runs on .NET 8
+        ForEach-Object { "/r:$coreDir\$_.dll" }
     $refs += "/r:$StudioProDir\Microsoft.CodeAnalysis.dll", "/r:$StudioProDir\Microsoft.CodeAnalysis.CSharp.dll"
     & $csc /nologo /noconfig /nostdlib+ /nowarn:1701 /target:exe "/out:$hostDll" @refs (Join-Path $tools "Program.cs")
     if ($LASTEXITCODE -ne 0) { throw "Bootstrapping the compiler host failed" }
     Copy-Item "$StudioProDir\Microsoft.CodeAnalysis.dll", "$StudioProDir\Microsoft.CodeAnalysis.CSharp.dll" (Split-Path $hostDll)
-    '{"runtimeOptions":{"tfm":"net8.0","framework":{"name":"Microsoft.NETCore.App","version":"8.0.0"}}}' |
+    "{`"runtimeOptions`":{`"tfm`":`"$tfm`",`"framework`":{`"name`":`"Microsoft.NETCore.App`",`"version`":`"$dotnetMajor.0.0`"}}}" |
         Set-Content -Encoding ascii (Join-Path (Split-Path $hostDll) "mxcsc.runtimeconfig.json")
 }
 
-# 2. Reference list: .NET 8 + WPF + the Studio Pro extensions API.
+# 2. Reference list: .NET + WPF + the Studio Pro extensions API.
 #    WindowsDesktop goes first: NETCore.App only has a WindowsBase facade, the real one is in WindowsDesktop.
 $refList = Join-Path $env:TEMP "dochighlighter-refs.txt"
 $seen = @{}
