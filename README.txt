@@ -3,7 +3,9 @@
 By Ahmad Alhussien - https://www.linkedin.com/in/ahmadalhussien/
 
 Color-code items in the Studio Pro **App Explorer**. Right-click any page, microflow, folder, module or other item and
-choose **Highlight → Green / Orange / Red**. On a module, the menu also shows how many items of each color it contains.
+choose **Green / Orange / Red** under **Highlight**. On a module, the menu also shows how many items of each color it contains.
+
+Shortcuts, while the App Explorer has focus: Ctrl+Alt+1 Green, Ctrl+Alt+2 Orange, Ctrl+Alt+3 Red, Ctrl+Alt+0 Remove.
 
 Highlights are stored on your own machine, outside the app/project, so nothing is ever committed. Works with Studio Pro
 10.24.1 and newer, including 11.x.

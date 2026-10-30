@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Mendix.StudioPro.ExtensionsAPI.Services;
@@ -83,6 +84,7 @@ internal sealed class AppExplorerPainter
             if (!reference.TryGetTarget(out var grid)) continue;
             grid.LoadingRow -= OnLoadingRow;
             grid.SelectionChanged -= OnSelectionChanged;
+            grid.PreviewKeyDown -= OnPreviewKeyDown;
             ForEachRealizedRow(grid, row => Apply(row, null));
         }
         grids.Clear();
@@ -181,6 +183,7 @@ internal sealed class AppExplorerPainter
         grids.Add(new WeakReference<DataGrid>(grid));
         grid.LoadingRow += OnLoadingRow;
         grid.SelectionChanged += OnSelectionChanged;
+        grid.PreviewKeyDown += OnPreviewKeyDown;
         var store = CurrentStore();
         log.Info($"DocHighlighter: attached to a document tree ({grid.GetType().FullName}); {store?.Count ?? 0} highlight(s) in {store?.FilePath ?? "<no app open>"}");
     }
@@ -189,6 +192,12 @@ internal sealed class AppExplorerPainter
     void OnLoadingRow(object? sender, DataGridRowEventArgs e) => PaintRow(e.Row, CurrentStore());
 
     void OnSelectionChanged(object sender, SelectionChangedEventArgs e) => RequestRepaint();
+
+    // Only fires while the App Explorer has keyboard focus, so the shortcuts never affect editors or other panes.
+    void OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is DataGrid grid && contextMenu.HandleHotkey(grid, e)) e.Handled = true;
+    }
 
     void PaintGrid(DataGrid grid, HighlightStore? store) => ForEachRealizedRow(grid, row => PaintRow(row, store));
 
