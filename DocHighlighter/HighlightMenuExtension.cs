@@ -11,7 +11,7 @@ using Mendix.StudioPro.ExtensionsAPI.UI.Menu;
 namespace DocHighlighter;
 
 /// <summary>
-/// Adds "Extensions > Document Highlighter" to the menu bar. Studio Pro asks menu extensions for their
+/// Adds "Extensions > Highlights > Open highlights folder" to the menu bar. Studio Pro asks menu extensions for their
 /// menus when an app opens, which starts the painter and the App Explorer context menu.
 /// </summary>
 /// <remarks>
@@ -34,26 +34,10 @@ public sealed class HighlightMenuExtension(ILogService log, IUntypedModelAccessS
         }
         AppExplorerPainter.EnsureStarted(AppDirectory, modules, log);
 
-        yield return new MenuViewModel("Document Highlighter", new[]
+        yield return new MenuViewModel("Highlights", new[]
         {
-            new MenuViewModel("Remove all highlights in this app", ClearAll),
             new MenuViewModel("Open highlights folder", OpenFolder),
         });
-    }
-
-    void ClearAll()
-    {
-        var appDirectory = AppDirectory();
-        if (appDirectory is null) return;
-        try
-        {
-            HighlightStore.ForApp(appDirectory, log).Clear();
-        }
-        catch (Exception ex)
-        {
-            log.Error("DocHighlighter: could not clear highlights", ex);
-        }
-        AppExplorerPainter.RequestRepaint();
     }
 
     void OpenFolder()

@@ -102,14 +102,6 @@ internal sealed class HighlightStore
         if (removed) Save();
     }
 
-    public void Clear()
-    {
-        ReloadIfChanged();
-        if (entries.Count == 0) return;
-        entries.Clear();
-        Save();
-    }
-
     /// <summary>Picks up edits made by another Studio Pro instance that has the same app open.</summary>
     public void ReloadIfChanged()
     {
