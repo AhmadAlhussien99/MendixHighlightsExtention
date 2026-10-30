@@ -11,11 +11,13 @@ internal enum HighlightColor
 
 internal static class HighlightBrushes
 {
-    // A modern palette (emerald, orange, rose). The row fill is a light ~14% tint so the row text stays the focus,
-    // and the strip is the same hue at full strength so the color is still clear at a glance and on selected rows.
-    static readonly Color Green = Color.FromRgb(0x10, 0xB9, 0x81);
-    static readonly Color Orange = Color.FromRgb(0xF9, 0x73, 0x16);
-    static readonly Color Red = Color.FromRgb(0xF4, 0x3F, 0x5E);
+    // A modern traffic-light palette (green, amber, red). Amber leans toward yellow and is lighter, red is deeper,
+    // so the two differ in both hue and brightness and stay apart even as a faint tint.
+    // The row fill is a light ~14% tint so the row text stays the focus, and the strip is the same hue at full
+    // strength so the color is still clear at a glance and on selected rows.
+    static readonly Color Green = Color.FromRgb(0x22, 0xC5, 0x5E);
+    static readonly Color Orange = Color.FromRgb(0xF5, 0x9E, 0x0B);
+    static readonly Color Red = Color.FromRgb(0xDC, 0x26, 0x26);
     const byte FillAlpha = 0x24;
 
     static readonly SolidColorBrush GreenFill = Freeze(Color.FromArgb(FillAlpha, Green.R, Green.G, Green.B));
