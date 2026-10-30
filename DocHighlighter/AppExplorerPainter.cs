@@ -36,11 +36,11 @@ internal sealed class AppExplorerPainter
     readonly ConditionalWeakTable<DataGridRow, RowState> rowStates = new();
     readonly ConditionalWeakTable<DataGridRow, ModuleFlag> flags = new();
     readonly Dictionary<(Type, string), PropertyInfo?> propertyCache = new();
-    readonly Dictionary<string, HighlightColor?> innerColors = new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, bool> flaggedModules = new(StringComparer.OrdinalIgnoreCase);
     HashSet<string>? moduleIds;
-    HighlightStore? innerColorsStore;
-    int innerColorsVersion;
-    DateTime innerColorsTimeUtc;
+    HighlightStore? flaggedModulesStore;
+    int flaggedModulesVersion;
+    DateTime flaggedModulesTimeUtc;
     int tickCount;
     int scansWithoutGrid;
     bool errorLogged;
@@ -98,7 +98,7 @@ internal sealed class AppExplorerPainter
             ForEachRealizedRow(grid, row =>
             {
                 Apply(row, null);
-                SetFlag(row, null);
+                SetFlag(row, false);
             });
         }
         grids.Clear();
@@ -236,14 +236,14 @@ internal sealed class AppExplorerPainter
     void PaintRow(DataGridRow row, HighlightStore? store)
     {
         HighlightColor? color = null;
-        HighlightColor? flag = null;
+        var flag = false;
         if (store != null && store.Count > 0)
         {
             var id = GetUnitId(row.Item);
             if (id != null)
             {
                 color = store.Get(id);
-                if (color is null) flag = InnerColor(id, store);
+                if (color is null) flag = HasHighlightsInside(id, store);
             }
             if (diagnostics && diagnosticRowsLogged < 15)
             {
@@ -256,41 +256,38 @@ internal sealed class AppExplorerPainter
     }
 
     /// <summary>
-    /// For a module row: the most serious color among the highlighted items inside the module (red, then orange, then
-    /// green), or null if there are none or the row is not a module. Walking a module is too slow for every repaint,
+    /// Whether this is a module row with highlighted items inside. Walking a module is too slow for every repaint,
     /// so results are kept until the highlights change, and for at most 10 seconds to pick up documents moved between
     /// modules.
     /// </summary>
-    HighlightColor? InnerColor(string id, HighlightStore store)
+    bool HasHighlightsInside(string id, HighlightStore store)
     {
-        if (!ReferenceEquals(store, innerColorsStore) || store.Version != innerColorsVersion ||
-            DateTime.UtcNow - innerColorsTimeUtc > TimeSpan.FromSeconds(10))
+        if (!ReferenceEquals(store, flaggedModulesStore) || store.Version != flaggedModulesVersion ||
+            DateTime.UtcNow - flaggedModulesTimeUtc > TimeSpan.FromSeconds(10))
         {
-            innerColors.Clear();
+            flaggedModules.Clear();
             moduleIds = null;
-            innerColorsStore = store;
-            innerColorsVersion = store.Version;
-            innerColorsTimeUtc = DateTime.UtcNow;
+            flaggedModulesStore = store;
+            flaggedModulesVersion = store.Version;
+            flaggedModulesTimeUtc = DateTime.UtcNow;
         }
         moduleIds ??= modules.GetModules().Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (!moduleIds.Contains(id)) return null;
+        if (!moduleIds.Contains(id)) return false;
 
-        if (!innerColors.TryGetValue(id, out var inner))
+        if (!flaggedModules.TryGetValue(id, out var hasHighlights))
         {
-            foreach (var itemId in modules.GetIdsInModules(new[] { id }, store))
-                if (!string.Equals(itemId, id, StringComparison.OrdinalIgnoreCase) && store.Get(itemId) is { } color &&
-                    (inner is null || color > inner))
-                    inner = color;
-            innerColors[id] = inner;
+            hasHighlights = modules.GetIdsInModules(new[] { id }, store)
+                .Any(itemId => !string.Equals(itemId, id, StringComparison.OrdinalIgnoreCase) && store.Get(itemId) != null);
+            flaggedModules[id] = hasHighlights;
         }
-        return inner;
+        return hasHighlights;
     }
 
-    void SetFlag(DataGridRow row, HighlightColor? color)
+    void SetFlag(DataGridRow row, bool show)
     {
         flags.TryGetValue(row, out var flag);
         // Rows recycled while scrolling can stay in the tree but hidden; they must not keep a flag.
-        if (color is null || !row.IsVisible)
+        if (!show || !row.IsVisible)
         {
             if (flag is null) return;
             AdornerLayer.GetAdornerLayer(row)?.Remove(flag);
@@ -301,12 +298,11 @@ internal sealed class AppExplorerPainter
         {
             var layer = AdornerLayer.GetAdornerLayer(row);
             if (layer is null) return;
-            flag = new ModuleFlag(row, color.Value);
+            flag = new ModuleFlag(row);
             layer.Add(flag);
             flags.Add(row, flag);
         }
-        flag.Color = color.Value;
-        // The name can move (renamed, tree indented differently), so redraw on every pass; it is a few lines.
+        // The name can move or change color (renamed, selected, theme), so redraw on every pass; it is a few lines.
         flag.InvalidateVisual();
     }
 

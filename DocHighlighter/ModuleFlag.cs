@@ -10,8 +10,8 @@ namespace DocHighlighter;
 
 /// <summary>
 /// A small flag drawn just after the name of a module row that is not highlighted itself but contains highlighted
-/// items, in the most serious color inside. It is an adorner: drawn on a layer above the row, so Studio Pro's own
-/// row content is never changed, and it ignores the mouse.
+/// items, in the same color as the module name. It is an adorner: drawn on a layer above the row, so Studio Pro's
+/// own row content is never changed, and it ignores the mouse.
 /// </summary>
 internal sealed class ModuleFlag : Adorner
 {
@@ -21,33 +21,22 @@ internal sealed class ModuleFlag : Adorner
     const double FlagHeight = 6;
     const double Gap = 6;
 
-    HighlightColor color;
-
-    public ModuleFlag(DataGridRow row, HighlightColor color) : base(row)
+    public ModuleFlag(DataGridRow row) : base(row)
     {
-        this.color = color;
         IsHitTestVisible = false;
-    }
-
-    public HighlightColor Color
-    {
-        get => color;
-        set
-        {
-            if (color == value) return;
-            color = value;
-            InvalidateVisual();
-        }
     }
 
     protected override void OnRender(DrawingContext drawing)
     {
-        var row = (FrameworkElement)AdornedElement;
-        var x = TextEnd(row) + Gap;
+        var row = (DataGridRow)AdornedElement;
+        var texts = VisibleTexts(row).ToList();
+        // Drawn after the last text (the name, or a version label shown after it), in the name's own color, so it
+        // follows the theme and the selected-row text color.
+        var x = texts.Count == 0 ? 0 : texts.Max(t => t.Right) + Gap;
+        var brush = texts.Count == 0 ? row.Foreground : texts.MinBy(t => t.Left).Text.Foreground;
         var top = Math.Round((row.ActualHeight - PoleHeight) / 2);
-        if (x + PoleWidth + FlagWidth > row.ActualWidth) return;
+        if (brush is null || x + PoleWidth + FlagWidth > row.ActualWidth) return;
 
-        var brush = HighlightBrushes.Strip(color);
         drawing.DrawRectangle(brush, null, new Rect(x, top, PoleWidth, PoleHeight));
         var pennant = new StreamGeometry();
         using (var context = pennant.Open())
@@ -60,18 +49,17 @@ internal sealed class ModuleFlag : Adorner
         drawing.DrawGeometry(brush, null, pennant);
     }
 
-    /// <summary>Where the row's text ends: the module name, or a version label shown after it.</summary>
-    static double TextEnd(FrameworkElement row)
+    /// <summary>The row's visible text blocks with where each starts and ends, relative to the row.</summary>
+    static IEnumerable<(TextBlock Text, double Left, double Right)> VisibleTexts(FrameworkElement row)
     {
-        double end = 0;
         foreach (var text in Descendants(row).OfType<TextBlock>())
         {
             if (!text.IsVisible || string.IsNullOrWhiteSpace(text.Text)) continue;
             // A stretched TextBlock can be wider than its text; DesiredSize is the width the text itself needs.
             var width = Math.Min(text.ActualWidth, text.DesiredSize.Width - text.Margin.Left - text.Margin.Right);
-            end = Math.Max(end, text.TransformToAncestor(row).Transform(new Point(width, 0)).X);
+            var toRow = text.TransformToAncestor(row);
+            yield return (text, toRow.Transform(new Point(0, 0)).X, toRow.Transform(new Point(width, 0)).X);
         }
-        return end;
     }
 
     static IEnumerable<DependencyObject> Descendants(DependencyObject root)
