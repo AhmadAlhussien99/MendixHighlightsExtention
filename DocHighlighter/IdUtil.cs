@@ -1,4 +1,7 @@
 using System;
+using System.Reflection;
+
+[assembly: AssemblyCopyright("Ahmad Alhussien - https://www.linkedin.com/in/ahmadalhussien/")]
 
 namespace DocHighlighter;
 

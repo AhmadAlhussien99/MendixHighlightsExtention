@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Emit;
 
 static class Program
 {
@@ -35,7 +36,13 @@ static class Program
             .WithOptimizationLevel(OptimizationLevel.Release)
             .WithNullableContextOptions(NullableContextOptions.Enable);
         var compilation = CSharpCompilation.Create(Path.GetFileNameWithoutExtension(outPath), trees, refs, options);
-        var result = compilation.Emit(outPath);
+        // Unlike csc, the Roslyn API adds no Windows version resource by itself; without one the DLL's Properties >
+        // Details tab stays empty, so build it from the assembly attributes (copyright, version, ...).
+        EmitResult result;
+        using (var peStream = File.Create(outPath))
+        using (var win32Resources = compilation.CreateDefaultWin32Resources(true, true, null, null))
+            result = compilation.Emit(peStream, win32Resources: win32Resources);
+        if (!result.Success) File.Delete(outPath);
 
         foreach (var diagnostic in result.Diagnostics.Where(d => d.Severity >= DiagnosticSeverity.Warning))
             Console.WriteLine(diagnostic.ToString());
