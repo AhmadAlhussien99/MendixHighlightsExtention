@@ -46,7 +46,8 @@ public sealed class HighlightMenuExtension(ILogService log, IUntypedModelAccessS
         try
         {
             Directory.CreateDirectory(HighlightStore.StorageRoot);
-            Process.Start("explorer.exe", HighlightStore.StorageRoot);
+            // Opening the folder through the shell needs no quoting of the path, which may contain spaces or commas.
+            Process.Start(new ProcessStartInfo(HighlightStore.StorageRoot) { UseShellExecute = true })?.Dispose();
         }
         catch (Exception ex)
         {

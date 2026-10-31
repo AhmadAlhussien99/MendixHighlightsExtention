@@ -98,6 +98,9 @@ internal sealed class AppExplorerContextMenu
     {
         color = null;
         if (Keyboard.Modifiers != (ModifierKeys.Control | ModifierKeys.Alt)) return false;
+        // AltGr arrives as Ctrl+Alt with the right Alt key down. On many keyboard layouts AltGr+digit types a character
+        // (@, #, {, ...), so only the left Alt key counts.
+        if (Keyboard.IsKeyDown(Key.RightAlt) && !Keyboard.IsKeyDown(Key.LeftAlt)) return false;
         // With Alt held, WPF can report the key as Key.System and put the real key in SystemKey.
         switch (e.Key == Key.System ? e.SystemKey : e.Key)
         {

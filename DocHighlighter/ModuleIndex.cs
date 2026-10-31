@@ -43,6 +43,24 @@ internal sealed class ModuleIndex(Func<IModel?> getModel, IUntypedModelAccessSer
         return ids;
     }
 
+    /// <summary>
+    /// For every unit directly inside a module or folder, the id of that module or folder. Following it upwards gives
+    /// every container a unit is in, so one call answers that for all highlights instead of walking each container.
+    /// </summary>
+    public Dictionary<string, string> GetContainerParents()
+    {
+        var parents = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (Root() is not { } root) return parents;
+        foreach (var container in root.GetUnitsOfType(ModuleType).Concat(root.GetUnitsOfType(FolderType)))
+        {
+            if (IdUtil.Normalize(container.ID) is not { } containerId) continue;
+            foreach (var child in container.GetUnits())
+                if (IdUtil.Normalize(child.ID) is { } childId)
+                    parents[childId] = containerId;
+        }
+        return parents;
+    }
+
     /// <summary>Ids of the module or folder itself and of every unit nested in it (folders, documents, domain model, ...).</summary>
     public HashSet<string> GetUnitIdsIn(string containerId)
     {

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -22,6 +23,7 @@ internal sealed class AppExplorerPainter
 {
     const string ExplorerGridTypeName = "TreeControlEtoDataGrid";
     static AppExplorerPainter? instance;
+    static int shutdownCount;
 
     readonly Func<string?> getAppDirectory;
     readonly ModuleIndex modules;
@@ -35,12 +37,12 @@ internal sealed class AppExplorerPainter
     readonly ConditionalWeakTable<DataGridRow, RowState> rowStates = new();
     readonly ConditionalWeakTable<DataGridRow, RowMarks> marks = new();
     readonly Dictionary<(Type, string), PropertyInfo?> propertyCache = new();
-    readonly Dictionary<string, bool> flaggedContainers = new(StringComparer.OrdinalIgnoreCase);
-    HashSet<string>? containerIds;
+    HashSet<string>? flaggedContainers;
     HighlightStore? flaggedContainersStore;
     int flaggedContainersVersion;
     DateTime flaggedContainersTimeUtc;
-    int tickCount;
+    int ticksUntilScan;
+    bool redrawAll;
     int scansWithoutGrid;
     bool errorLogged;
     int diagnosticRowsLogged;
@@ -63,7 +65,21 @@ internal sealed class AppExplorerPainter
     {
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher is null) return;
-        dispatcher.BeginInvoke(() => instance ??= new AppExplorerPainter(dispatcher, getAppDirectory, modules, log));
+        // If Shutdown comes before this queued start runs, the start must not happen, or a painter would keep running
+        // for an extension that has already unloaded.
+        var shutdownsBefore = Volatile.Read(ref shutdownCount);
+        dispatcher.BeginInvoke(() =>
+        {
+            if (instance != null || Volatile.Read(ref shutdownCount) != shutdownsBefore) return;
+            try
+            {
+                instance = new AppExplorerPainter(dispatcher, getAppDirectory, modules, log);
+            }
+            catch (Exception ex)
+            {
+                log.Error("DocHighlighter: could not start", ex);
+            }
+        });
     }
 
     public static void RequestRepaint()
@@ -78,10 +94,19 @@ internal sealed class AppExplorerPainter
     /// </summary>
     public static void Shutdown()
     {
-        var painter = instance;
+        Interlocked.Increment(ref shutdownCount);
+        var painter = Interlocked.Exchange(ref instance, null);
         if (painter is null) return;
-        instance = null;
-        painter.dispatcher.Invoke(painter.Stop);
+        try
+        {
+            // While Studio Pro itself is closing the dispatcher may be gone; there is nothing left to restore then.
+            if (!painter.dispatcher.HasShutdownStarted)
+                painter.dispatcher.Invoke(painter.Stop);
+        }
+        catch (Exception ex)
+        {
+            painter.log.Error("DocHighlighter: could not stop cleanly", ex);
+        }
     }
 
     void Stop()
@@ -112,11 +137,14 @@ internal sealed class AppExplorerPainter
             var store = CurrentStore();
             store?.ReloadIfChanged();
 
-            // A full visual-tree scan is the expensive part, so only rescan every few seconds
-            // or when no App Explorer grid is known yet.
-            if (tickCount++ % 6 == 0 || grids.Count == 0)
+            // A full visual-tree scan is the expensive part, so only rescan every few seconds, a little sooner while no
+            // App Explorer grid is known (it is closed, or no app is open) so it is picked up quickly once it appears.
+            // The marks are also redrawn on these passes, in case a row changed in a way RowMarks.RenderKey misses.
+            redrawAll = --ticksUntilScan <= 0;
+            if (redrawAll)
             {
                 ScanForGrids();
+                ticksUntilScan = grids.Count == 0 ? 2 : 6;
                 if (store != null) WarnIfExplorerNotFound();
             }
 
@@ -130,12 +158,19 @@ internal sealed class AppExplorerPainter
         }
         catch (Exception ex)
         {
-            if (!errorLogged)
-            {
-                errorLogged = true;
-                log.Error("DocHighlighter: painting failed", ex);
-            }
+            LogPaintError(ex);
         }
+        finally
+        {
+            redrawAll = false;
+        }
+    }
+
+    void LogPaintError(Exception ex)
+    {
+        if (errorLogged) return;
+        errorLogged = true;
+        log.Error("DocHighlighter: painting failed", ex);
     }
 
     public HighlightStore? CurrentStore()
@@ -177,7 +212,8 @@ internal sealed class AppExplorerPainter
             scansWithoutGrid = 0;
             return;
         }
-        if (++scansWithoutGrid != 40) return;
+        // Without a grid, scans run every 2 ticks of 750 ms, so 20 scans is about 30 seconds.
+        if (++scansWithoutGrid != 20) return;
         log.Warn($"DocHighlighter: the App Explorer ({ExplorerGridTypeName}) was not found. If it is open, this Studio Pro " +
                  "version may have changed its internals: highlight colors and the Highlight menu are unavailable. " +
                  "Please report your Studio Pro version.");
@@ -204,7 +240,18 @@ internal sealed class AppExplorerPainter
     }
 
     // Rows are virtualized and recycled while scrolling, so each newly loaded row is painted right away.
-    void OnLoadingRow(object? sender, DataGridRowEventArgs e) => PaintRow(e.Row, CurrentStore());
+    // An exception here would escape into the DataGrid's row generation and so into Studio Pro; it must never leave.
+    void OnLoadingRow(object? sender, DataGridRowEventArgs e)
+    {
+        try
+        {
+            PaintRow(e.Row, CurrentStore());
+        }
+        catch (Exception ex)
+        {
+            LogPaintError(ex);
+        }
+    }
 
     void OnSelectionChanged(object sender, SelectionChangedEventArgs e) => RequestRepaint();
 
@@ -267,31 +314,37 @@ internal sealed class AppExplorerPainter
     }
 
     /// <summary>
-    /// Whether this is a module or folder row with highlighted items inside. Walking one is too slow for every repaint,
-    /// so results are kept until the highlights change, and for at most 10 seconds to pick up documents moved between
-    /// modules and folders.
+    /// Whether this is a module or folder row with highlighted items inside (its own highlight does not count). Every
+    /// module and folder that holds a highlighted item, at any depth, is worked out in one pass and kept until the
+    /// highlights change, and for at most 10 seconds to pick up documents moved between modules and folders.
     /// </summary>
     bool HasHighlightsInside(string id, HighlightStore store)
     {
-        if (!ReferenceEquals(store, flaggedContainersStore) || store.Version != flaggedContainersVersion ||
-            DateTime.UtcNow - flaggedContainersTimeUtc > TimeSpan.FromSeconds(10))
+        if (flaggedContainers is null || !ReferenceEquals(store, flaggedContainersStore) ||
+            store.Version != flaggedContainersVersion || DateTime.UtcNow - flaggedContainersTimeUtc > TimeSpan.FromSeconds(10))
         {
-            flaggedContainers.Clear();
-            containerIds = null;
+            flaggedContainers = FindFlaggedContainers(store);
             flaggedContainersStore = store;
             flaggedContainersVersion = store.Version;
             flaggedContainersTimeUtc = DateTime.UtcNow;
         }
-        containerIds ??= modules.GetContainerIds();
-        if (!containerIds.Contains(id)) return false;
+        return flaggedContainers.Contains(id);
+    }
 
-        if (!flaggedContainers.TryGetValue(id, out var hasHighlights))
+    HashSet<string> FindFlaggedContainers(HighlightStore store)
+    {
+        var parents = modules.GetContainerParents();
+        var flagged = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (id, fileModule) in store.Highlighted())
         {
-            hasHighlights = modules.GetIdsIn(new[] { id }, store)
-                .Any(itemId => !string.Equals(itemId, id, StringComparison.OrdinalIgnoreCase) && store.Get(itemId) != null);
-            flaggedContainers[id] = hasHighlights;
+            // Start at the item's own container, so a highlighted module or folder does not flag itself. Items that are
+            // files rather than model units are not in the model; for those the module recorded with them is used.
+            var container = parents.TryGetValue(id, out var parent) ? parent : fileModule;
+            // Once a container is in the set, so are all the ones above it.
+            while (container != null && flagged.Add(container))
+                container = parents.GetValueOrDefault(container);
         }
-        return hasHighlights;
+        return flagged;
     }
 
     /// <summary>Shows the strip and/or flag on a row, or removes the overlay when the row needs neither.</summary>
@@ -301,24 +354,50 @@ internal sealed class AppExplorerPainter
         // Rows recycled while scrolling can stay in the tree but hidden; they must not keep their marks.
         if ((strip is null && !flag) || !row.IsVisible)
         {
-            if (rowMarks is null) return;
-            AdornerLayer.GetAdornerLayer(row)?.Remove(rowMarks);
-            marks.Remove(row);
+            if (rowMarks != null) RemoveMarks(row, rowMarks);
             return;
         }
         if (rowMarks is null)
         {
             var layer = AdornerLayer.GetAdornerLayer(row);
             if (layer is null) return;
-            rowMarks = new RowMarks(row);
+            rowMarks = new RowMarks(row, layer, LogPaintError);
             layer.Add(rowMarks);
             marks.Add(row, rowMarks);
+            row.Unloaded += OnRowUnloaded;
         }
+        // Redraw only when something the marks depend on changed: a recycled row showing another item, a rename (the
+        // flag follows the name), selection (the flag takes the text color), size or theme. Horizontal scrolling is
+        // handled by OnScrollChanged, and the regular full pass (redrawAll) catches anything else.
+        var renderKey = (strip, flag, row.Item, row.Item is null ? null : GetLabel(row.Item), row.IsSelected,
+            row.ActualWidth, row.ActualHeight, row.Foreground);
+        if (!redrawAll && Equals(rowMarks.RenderKey, renderKey)) return;
         rowMarks.Strip = strip;
         rowMarks.Flag = flag;
-        // The row can scroll, resize or change its name and colors (renamed, selected, theme), so redraw on every
-        // pass; it is a few lines.
+        rowMarks.RenderKey = renderKey;
         rowMarks.InvalidateVisual();
+    }
+
+    void RemoveMarks(DataGridRow row, RowMarks rowMarks)
+    {
+        row.Unloaded -= OnRowUnloaded;
+        // The layer the marks were added to: once the row has left the tree it can no longer be looked up from the row.
+        rowMarks.Layer.Remove(rowMarks);
+        marks.Remove(row);
+    }
+
+    // A row the grid discards (rather than recycles) is never painted again, and the adorner layer would keep it, and
+    // the Studio Pro item behind it, alive. Rows that come back (a pane re-docked) are given new marks by the next pass.
+    void OnRowUnloaded(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (sender is DataGridRow row && marks.TryGetValue(row, out var rowMarks)) RemoveMarks(row, rowMarks);
+        }
+        catch (Exception ex)
+        {
+            LogPaintError(ex);
+        }
     }
 
     /// <summary>

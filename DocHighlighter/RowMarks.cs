@@ -22,10 +22,20 @@ internal sealed class RowMarks : Adorner
     const double FlagHeight = 6;
     const double FlagGap = 6;
 
-    public RowMarks(DataGridRow row) : base(row)
+    readonly Action<Exception> onError;
+
+    public RowMarks(DataGridRow row, AdornerLayer layer, Action<Exception> onError) : base(row)
     {
+        Layer = layer;
+        this.onError = onError;
         IsHitTestVisible = false;
     }
+
+    /// <summary>The adorner layer these marks were added to, so they can be removed after the row left the tree.</summary>
+    public AdornerLayer Layer { get; }
+
+    /// <summary>What the marks were last drawn for; the painter only redraws them when this changes.</summary>
+    public object? RenderKey { get; set; }
 
     /// <summary>The strip color of a highlighted row, or null for none.</summary>
     public Brush? Strip { get; set; }
@@ -35,11 +45,19 @@ internal sealed class RowMarks : Adorner
 
     protected override void OnRender(DrawingContext drawing)
     {
-        var row = (DataGridRow)AdornedElement;
-        if (Strip != null)
-            drawing.DrawRectangle(Strip, null, new Rect(VisibleLeft(row), 0, StripWidth, row.ActualHeight));
-        if (Flag)
-            DrawFlag(drawing, row);
+        // An exception during rendering would reach Studio Pro's render pass; missing marks are the lesser harm.
+        try
+        {
+            var row = (DataGridRow)AdornedElement;
+            if (Strip != null)
+                drawing.DrawRectangle(Strip, null, new Rect(VisibleLeft(row), 0, StripWidth, row.ActualHeight));
+            if (Flag)
+                DrawFlag(drawing, row);
+        }
+        catch (Exception ex)
+        {
+            onError(ex);
+        }
     }
 
     /// <summary>
